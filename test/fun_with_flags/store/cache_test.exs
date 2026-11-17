@@ -229,10 +229,33 @@ defmodule FunWithFlags.Store.CacheTest do
       assert [{^name, {^new_flag, _, _}}] = Enum.filter(Cache.dump(), &(elem(&1, 0) == name))
     end
 
+    test "replacing a flag deletes the table of its previous gates", %{name: name} do
+      {old_tid, _} = flag_table(name)
+      Cache.put(%Flag{name: name, gates: [Gate.new(:boolean, true)]})
+
+      {new_tid, _} = flag_table(name)
+      assert new_tid != old_tid
+      assert :undefined = :ets.info(old_tid)
+    end
+
+    test "putting an unchanged flag keeps its table and refreshes its timestamp", %{name: name, flag: flag} do
+      {tid, timestamp} = flag_table(name)
+
+      timetravel by: (Config.cache_ttl + 1) do
+        assert :miss = Cache.enabled?(name, for: %FunWithFlags.TestUser{id: 1})
+        Cache.put(flag)
+        assert {:ok, true} = Cache.enabled?(name, for: %FunWithFlags.TestUser{id: 1})
+        assert {^tid, new_timestamp} = flag_table(name)
+        assert new_timestamp > timestamp
+      end
+    end
+
     test "flush() removes all the gate rows", %{name: name} do
+      {tid, _} = flag_table(name)
       Cache.flush()
       assert :miss = Cache.enabled?(name, for: %FunWithFlags.TestUser{id: 1})
       assert 0 = row_count(name)
+      assert :undefined = :ets.info(tid)
     end
   end
 
@@ -322,10 +345,16 @@ defmodule FunWithFlags.Store.CacheTest do
 
 
   defp row_count(name) do
-    :ets.select_count(:fun_with_flags_cache, [
-      {{name, :_, :_, :_, :_}, [], [true]},
-      {{{name, :_, :_}, :_}, [], [true]},
-    ])
+    case :ets.lookup(:fun_with_flags_cache, name) do
+      [{^name, tid, _, _, _}] -> 1 + :ets.info(tid, :size)
+      [] -> 0
+    end
+  end
+
+
+  defp flag_table(name) do
+    [{^name, tid, timestamp, _, _}] = :ets.lookup(:fun_with_flags_cache, name)
+    {tid, timestamp}
   end
 
 

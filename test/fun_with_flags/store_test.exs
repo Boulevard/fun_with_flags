@@ -37,6 +37,15 @@ defmodule FunWithFlags.StoreTest do
       assert {:ok, ^flag} = Store.lookup(name)
     end
 
+    test "when caching the loaded flag times out, lookup() still returns the flag from storage", %{name: name, gate: gate, flag: flag} do
+      {:ok, ^flag} = @persistence.put(name, gate)
+
+      with_mock(Cache, [:passthrough], [put: fn(_flag) -> exit({:timeout, {GenServer, :call, [Cache, :put, 5000]}}) end]) do
+        assert {:ok, ^flag} = Store.lookup(name)
+        assert true = FunWithFlags.enabled?(name)
+      end
+    end
+
     @tag :telemetry
     test "when there is a cache hit, lookup() will not publish any telemetry event", %{name: name, gate: gate, flag: flag} do
       event = [:fun_with_flags, :persistence, :read]

@@ -16,7 +16,7 @@ defmodule FunWithFlags.Store do
         case persistence_adapter().get(flag_name) do
           {:ok, flag} ->
             Telemetry.emit_persistence_event({:ok, nil}, :read, flag_name, nil)
-            Cache.put(flag)
+            fill_cache(flag)
             {:ok, flag}
           err = {:error, _reason} ->
             Telemetry.emit_persistence_event(err, :read, flag_name, nil)
@@ -35,6 +35,15 @@ defmodule FunWithFlags.Store do
         {:ok, flag} = lookup(flag_name)
         Flag.enabled?(flag, options)
     end
+  end
+
+
+  defp fill_cache(flag = %Flag{name: flag_name}) do
+    Cache.put(flag)
+  catch
+    :exit, {:timeout, _} ->
+      Logger.warning "FunWithFlags: timed out caching flag '#{flag_name}' in ETS, returning the value loaded from storage"
+      {:ok, flag}
   end
 
 
